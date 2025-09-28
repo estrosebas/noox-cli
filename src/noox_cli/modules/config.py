@@ -190,6 +190,11 @@ class ConfigModule:
             table.add_row("Python sys.stdout.encoding", encoding_info['stdout'])
             table.add_row("Python locale", encoding_info['locale'])
             
+            # Codificación de PowerShell (como en el .bat original)
+            ps_encoding = self._get_powershell_encoding()
+            table.add_row("PowerShell OutputEncoding", ps_encoding['output'])
+            table.add_row("PowerShell Console.OutputEncoding", ps_encoding['console'])
+            
             self.menu.console.print(table)
             
         except Exception as e:
@@ -390,6 +395,31 @@ class ConfigModule:
             'stdout': sys.stdout.encoding or "No disponible",
             'locale': locale.getpreferredencoding()
         }
+    
+    def _get_powershell_encoding(self) -> Dict[str, str]:
+        """Obtiene información de codificación de PowerShell."""
+        try:
+            # Obtener OutputEncoding de PowerShell
+            result_output = subprocess.run([
+                'powershell', '-Command', 
+                'Write-Host $OutputEncoding.EncodingName -NoNewline'
+            ], capture_output=True, text=True, shell=True)
+            
+            # Obtener Console.OutputEncoding de PowerShell
+            result_console = subprocess.run([
+                'powershell', '-Command', 
+                'Write-Host [Console]::OutputEncoding.EncodingName -NoNewline'
+            ], capture_output=True, text=True, shell=True)
+            
+            return {
+                'output': result_output.stdout.strip() if result_output.stdout else "No disponible",
+                'console': result_console.stdout.strip() if result_console.stdout else "No disponible"
+            }
+        except Exception:
+            return {
+                'output': "Error al obtener",
+                'console': "Error al obtener"
+            }
     
     def _show_applied_changes(self):
         """Muestra un resumen de los cambios aplicados."""

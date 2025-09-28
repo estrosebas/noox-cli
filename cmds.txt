@@ -1,0 +1,7 @@
+# Instalar (desde la carpeta del proyecto)
+pip install -e .
+
+# Ejecutar
+python -m noox_cli.main
+
+# Navegar con flechas ↑↓, seleccionar con ENTER
