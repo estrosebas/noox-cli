@@ -201,21 +201,17 @@ class ProyectosModule:
         
         try:
             if selection == 'vscode':
-                if self._command_exists('code'):
-                    subprocess.run(['code', str(project_path)], check=True)
+                if self._open_vscode(project_path):
                     self.menu.show_success("✅ VS Code abierto")
                 else:
-                    self.menu.show_error("❌ VS Code no está instalado")
+                    self.menu.show_error("❌ VS Code no está instalado o no se pudo abrir")
+                    self.menu.show_info("💡 Instala VS Code desde: https://code.visualstudio.com/")
             
             elif selection == 'terminal':
-                if os.name == 'nt':
-                    subprocess.Popen([
-                        'powershell', '-NoExit', '-Command', 
-                        f"cd '{project_path}'"
-                    ])
+                if self._open_terminal(project_path):
                     self.menu.show_success("✅ Terminal abierto")
                 else:
-                    subprocess.Popen(['gnome-terminal', '--working-directory', str(project_path)])
+                    self.menu.show_error("❌ No se pudo abrir el terminal")
             
             elif selection == 'browser':
                 # Intentar abrir en localhost
@@ -933,9 +929,148 @@ $created_at = date('Y-m-d H:i:s');
     def _command_exists(self, command: str) -> bool:
         """Verifica si un comando existe en el sistema."""
         try:
-            subprocess.run([command, '--version'], capture_output=True, check=True)
+            subprocess.run([command, '--version'], capture_output=True, check=True, timeout=5)
             return True
-        except (subprocess.CalledProcessError, FileNotFoundError):
+        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+            # Para VS Code, intentar variaciones del comando
+            if command == 'code':
+                # Probar code.cmd que es lo que realmente funciona
+                try:
+                    subprocess.run(['code.cmd', '--version'], capture_output=True, check=True, timeout=5)
+                    return True
+                except:
+                    return self._check_vscode_installation()
+            return False
+    
+    def _check_vscode_installation(self) -> bool:
+        """Verifica si VS Code está instalado en ubicaciones comunes."""
+        # Rutas comunes donde se instala VS Code
+        common_paths = [
+            # Tu ubicación específica
+            r"C:\Users\{}\AppData\Local\Programs\Microsoft VS Code\bin\code.cmd".format(os.environ.get('USERNAME', '')),
+            r"C:\Users\{}\AppData\Local\Programs\Microsoft VS Code\Code.exe".format(os.environ.get('USERNAME', '')),
+            # Instalaciones del sistema
+            r"C:\Program Files\Microsoft VS Code\bin\code.cmd",
+            r"C:\Program Files\Microsoft VS Code\Code.exe",
+            r"C:\Program Files (x86)\Microsoft VS Code\bin\code.cmd",
+            r"C:\Program Files (x86)\Microsoft VS Code\Code.exe",
+            # Comandos en PATH
+            "code.cmd",
+            "code"
+        ]
+        
+        for path in common_paths:
+            try:
+                if os.path.exists(path):
+                    return True
+                # Intentar ejecutar el comando
+                subprocess.run([path, '--version'], capture_output=True, check=True, timeout=5)
+                return True
+            except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+                continue
+        
+        # Verificar en PATH del sistema (no solo del usuario)
+        try:
+            # Obtener PATH completo del sistema
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment") as key:
+                system_path = winreg.QueryValueEx(key, "Path")[0]
+                if "Microsoft VS Code" in system_path:
+                    return True
+        except Exception:
+            pass
+        
+        return False
+    
+    def _open_vscode(self, project_path: Path) -> bool:
+        """Abre VS Code con mejor detección de rutas."""
+        # Lista de rutas a probar en orden de preferencia
+        vscode_commands = [
+            # Comando que sabemos que funciona en tu sistema
+            'code.cmd',
+            # Comando directo (si está en PATH)
+            'code',
+            # Tu ubicación específica - comando code
+            rf"C:\Users\{os.environ.get('USERNAME', '')}\AppData\Local\Programs\Microsoft VS Code\bin\code.cmd",
+            # Tu ubicación específica - ejecutable directo
+            rf"C:\Users\{os.environ.get('USERNAME', '')}\AppData\Local\Programs\Microsoft VS Code\Code.exe",
+            # Instalaciones del sistema
+            r"C:\Program Files\Microsoft VS Code\bin\code.cmd",
+            r"C:\Program Files\Microsoft VS Code\Code.exe",
+            r"C:\Program Files (x86)\Microsoft VS Code\bin\code.cmd",
+            r"C:\Program Files (x86)\Microsoft VS Code\Code.exe"
+        ]
+        
+        for vscode_cmd in vscode_commands:
+            try:
+                # Si es solo 'code', intentar como comando
+                if vscode_cmd == 'code':
+                    subprocess.run([vscode_cmd, str(project_path)], check=True, timeout=10)
+                    return True
+                
+                # Para rutas específicas, verificar que exista primero
+                if os.path.exists(vscode_cmd):
+                    # Usar Popen para no bloquear
+                    subprocess.Popen([vscode_cmd, str(project_path)])
+                    return True
+                    
+            except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+                continue
+            except Exception as e:
+                # Log del error pero continuar con la siguiente opción
+                continue
+        
+        return False
+    
+    def _open_terminal(self, project_path: Path) -> bool:
+        """Abre terminal en el directorio del proyecto con manejo mejorado de errores."""
+        try:
+            if os.name == 'nt':
+                # Intentar Windows Terminal primero (más moderno)
+                if os.environ.get('WT_SESSION'):
+                    try:
+                        subprocess.Popen([
+                            'wt', '-d', str(project_path)
+                        ])
+                        return True
+                    except FileNotFoundError:
+                        pass
+                
+                # Intentar PowerShell 7 primero (pwsh)
+                try:
+                    subprocess.Popen([
+                        'pwsh', '-NoExit', '-Command', 
+                        f"Set-Location '{project_path}'; Write-Host 'Directorio: {project_path}' -ForegroundColor Green"
+                    ])
+                    return True
+                except FileNotFoundError:
+                    # Fallback a PowerShell 5.1 si pwsh no está disponible
+                    try:
+                        subprocess.Popen([
+                            'powershell', '-NoExit', '-Command', 
+                            f"Set-Location '{project_path}'; Write-Host 'Directorio: {project_path}' -ForegroundColor Green"
+                        ])
+                        return True
+                    except Exception:
+                        # Último recurso: cmd
+                        subprocess.Popen([
+                            'cmd', '/k', f'cd /d "{project_path}"'
+                        ])
+                        return True
+            else:
+                # Linux/Mac
+                terminals = ['gnome-terminal', 'xterm', 'konsole']
+                for terminal in terminals:
+                    try:
+                        subprocess.Popen([terminal, '--working-directory', str(project_path)])
+                        return True
+                    except FileNotFoundError:
+                        continue
+            
+            return False
+            
+        except Exception as e:
+            self.menu.show_error(f"Error abriendo terminal: {e}")
             return False
 
 

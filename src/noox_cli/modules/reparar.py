@@ -22,8 +22,14 @@ class RepararModule:
     
     def __init__(self):
         self.menu = NooxMenu("Reparación - NooxCLI")
-        self.powershell_dir = Path.home() / "Documents" / "WindowsPowerShell"
-        self.profile_path = self.powershell_dir / "Microsoft.PowerShell_profile.ps1"
+        # Manejar ambas ubicaciones de PowerShell
+        self.powershell_dirs = [
+            Path.home() / "Documents" / "WindowsPowerShell",  # Windows PowerShell 5.x
+            Path.home() / "Documents" / "PowerShell"          # PowerShell Core 6+
+        ]
+        self.profile_paths = [
+            dir_path / "Microsoft.PowerShell_profile.ps1" for dir_path in self.powershell_dirs
+        ]
     
     def main(self):
         """Función principal con menú interactivo."""
@@ -103,23 +109,24 @@ class RepararModule:
             Ruta del backup creado o None si falló
         """
         try:
-            # Verificar que el directorio de PowerShell exista
-            if not self.powershell_dir.exists():
-                self.menu.show_warning("El directorio de PowerShell no existe")
-                return None
+            # Buscar perfiles existentes
+            existing_profiles = [path for path in self.profile_paths if path.exists()]
             
-            # Verificar que el perfil actual exista
-            if not self.profile_path.exists():
+            if not existing_profiles:
                 self.menu.show_warning("No existe un perfil actual para respaldar")
                 return None
+            
+            # Usar el primer perfil encontrado para el backup
+            profile_to_backup = existing_profiles[0]
+            powershell_dir = profile_to_backup.parent
             
             # Generar nombre de backup con timestamp
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             backup_name = f"Microsoft.PowerShell_profile_backup_{timestamp}.ps1"
-            backup_path = self.powershell_dir / backup_name
+            backup_path = powershell_dir / backup_name
             
             # Crear el backup
-            shutil.copy2(self.profile_path, backup_path)
+            shutil.copy2(profile_to_backup, backup_path)
             
             self.menu.show_success(f"Backup creado: {backup_name}")
             self.menu.show_info(f"Ubicación: {backup_path}")
@@ -133,25 +140,39 @@ class RepararModule:
     def _generate_profile(self) -> bool:
         """
         Genera un nuevo perfil de PowerShell con configuración UTF-8 completa.
+        Actualiza ambas ubicaciones de PowerShell (5.x y Core 6+).
         
         Returns:
             True si se generó correctamente, False en caso contrario
         """
         try:
-            # Crear directorio si no existe
-            self.powershell_dir.mkdir(parents=True, exist_ok=True)
-            
             # Contenido del perfil basado en reparar-perfil.bat
             profile_content = self._get_profile_content()
             
-            # Escribir el nuevo perfil
-            with open(self.profile_path, 'w', encoding='utf-8') as f:
-                f.write(profile_content)
+            success_count = 0
             
-            self.menu.show_success("Perfil de PowerShell generado correctamente")
-            self.menu.show_info(f"Ubicación: {self.profile_path}")
+            # Generar perfil en ambas ubicaciones
+            for i, (powershell_dir, profile_path) in enumerate(zip(self.powershell_dirs, self.profile_paths)):
+                try:
+                    # Crear directorio si no existe
+                    powershell_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    # Escribir el nuevo perfil
+                    with open(profile_path, 'w', encoding='utf-8') as f:
+                        f.write(profile_content)
+                    
+                    self.menu.show_success(f"Perfil generado: {profile_path}")
+                    success_count += 1
+                    
+                except Exception as e:
+                    self.menu.show_warning(f"No se pudo generar perfil en {profile_path}: {e}")
             
-            return True
+            if success_count > 0:
+                self.menu.show_success("Perfil de PowerShell generado correctamente")
+                return True
+            else:
+                self.menu.show_error("No se pudo generar ningún perfil")
+                return False
             
         except Exception as e:
             self.menu.show_error(f"Error generando perfil: {e}")
@@ -196,21 +217,25 @@ $usuario = [System.Environment]::UserName
 $pc = $env:COMPUTERNAME
 
 Write-Host ""
-Write-Host "╭─ $usuario@$pc ───────────────────────────────" -ForegroundColor Cyan
-Write-Host "│ ¡Bienvenido, Sebas! Listo para codear 💻⚡         " -ForegroundColor Green
-Write-Host "│ Fecha: $fecha                              " -ForegroundColor Yellow
-Write-Host "├─ Alias disponibles:                              " -ForegroundColor Magenta
-Write-Host "│ • dev    → Entorno de desarrollo                 " -ForegroundColor White
-Write-Host "│ • sys    → Scripts del sistema                   " -ForegroundColor White
-Write-Host "│ • proj   → Proyectos de Laragon                  " -ForegroundColor White
-Write-Host "│ • config → Configuracion UTF-8/Consola          " -ForegroundColor White
-Write-Host "│ • ll     → Lista detallada de archivos           " -ForegroundColor White
-Write-Host "╰───────────────────────────────────────────────────────" -ForegroundColor Cyan
+Write-Host "================================================" -ForegroundColor Cyan
+Write-Host " NooxCLI - Terminal de Desarrollo" -ForegroundColor Green
+Write-Host " Usuario: $usuario@$pc" -ForegroundColor Yellow
+Write-Host " Fecha: $fecha" -ForegroundColor Yellow
+Write-Host "================================================" -ForegroundColor Cyan
+Write-Host " Alias disponibles:" -ForegroundColor Magenta
+Write-Host "  dev    -> Entorno de desarrollo" -ForegroundColor White
+Write-Host "  sys    -> Scripts del sistema" -ForegroundColor White
+Write-Host "  proj   -> Proyectos de Laragon" -ForegroundColor White
+Write-Host "  config -> Configuracion UTF-8/Consola" -ForegroundColor White
+Write-Host "  ll     -> Lista detallada de archivos" -ForegroundColor White
+Write-Host "================================================" -ForegroundColor Cyan
 Write-Host ""
 
 if (Test-Path .git) {
-    $branch = git branch --show-current
-    Write-Host "📁 Rama actual: $branch" -ForegroundColor DarkGray
+    $branch = git branch --show-current 2>$null
+    if ($branch) {
+        Write-Host "Git - Rama actual: $branch" -ForegroundColor DarkGray
+    }
 }
 
 # Inicializar oh-my-posh
