@@ -378,7 +378,7 @@ class DesarrolloModule:
         """Abre terminal normal en el directorio actual."""
         try:
             if os.name == 'nt':
-                # Intentar Windows Terminal primero - abrir en la app existente
+                # PRIORIDAD 1: Intentar Windows Terminal (wt command)
                 if self._command_exists('wt'):
                     try:
                         # Si ya estamos en Windows Terminal, abrir nueva pestaña
@@ -393,6 +393,23 @@ class DesarrolloModule:
                             ])
                         return True
                     except FileNotFoundError:
+                        pass
+                
+                # PRIORIDAD 2: Buscar Windows Terminal en ubicaciones comunes
+                wt_executable = self._find_windows_terminal()
+                if wt_executable:
+                    try:
+                        # Intentar abrir Windows Terminal directamente
+                        if os.environ.get('WT_SESSION'):
+                            subprocess.run([
+                                wt_executable, 'new-tab', '--startingDirectory', str(self.current_dir)
+                            ])
+                        else:
+                            subprocess.run([
+                                wt_executable, '-d', str(self.current_dir)
+                            ])
+                        return True
+                    except Exception:
                         pass
                 
                 # Intentar PowerShell 7 con configuración limpia
@@ -835,6 +852,46 @@ class DesarrolloModule:
                 continue
         
         return False
+    
+    def _find_windows_terminal(self) -> Optional[str]:
+        """Busca Windows Terminal en ubicaciones comunes y retorna la ruta si lo encuentra."""
+        # Primero intentar el comando wt
+        if self._command_exists('wt'):
+            return 'wt'
+        
+        # Buscar ejecutable en ubicaciones comunes
+        wt_paths = [
+            # Microsoft Store - usuario actual
+            os.path.expandvars(r'%LOCALAPPDATA%\Microsoft\WindowsApps\wt.exe'),
+            # Microsoft Store - sistema (con wildcard)
+            r'C:\Program Files\WindowsApps\Microsoft.WindowsTerminal_*\wt.exe',
+            # Instalación manual
+            r'C:\Program Files\Windows Terminal\wt.exe',
+            r'C:\Program Files (x86)\Windows Terminal\wt.exe',
+            # Otras ubicaciones posibles
+            os.path.expandvars(r'%USERPROFILE%\AppData\Local\Microsoft\WindowsApps\Microsoft.WindowsTerminal_*\wt.exe'),
+            os.path.expandvars(r'%PROGRAMFILES%\WindowsApps\Microsoft.WindowsTerminal_*\wt.exe')
+        ]
+        
+        for wt_path in wt_paths:
+            try:
+                # Para rutas con wildcards, usar glob
+                if '*' in wt_path:
+                    import glob
+                    matching_paths = glob.glob(wt_path)
+                    if matching_paths:
+                        # Ordenar para obtener la versión más reciente
+                        matching_paths.sort(reverse=True)
+                        wt_path = matching_paths[0]
+                    else:
+                        continue
+                
+                if os.path.exists(wt_path):
+                    return wt_path
+            except Exception:
+                continue
+        
+        return None
     
     def _install_windows_terminal(self):
         """Ayuda al usuario a instalar Windows Terminal."""

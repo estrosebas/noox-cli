@@ -1042,7 +1042,7 @@ $created_at = date('Y-m-d H:i:s');
         """Abre terminal en el directorio del proyecto con manejo mejorado de errores."""
         try:
             if os.name == 'nt':
-                # Intentar Windows Terminal primero - abrir en la app existente
+                # PRIORIDAD 1: Intentar Windows Terminal (wt command)
                 if self._command_exists('wt'):
                     try:
                         # Si ya estamos en Windows Terminal, abrir nueva pestaña
@@ -1057,6 +1057,23 @@ $created_at = date('Y-m-d H:i:s');
                             ])
                         return True
                     except FileNotFoundError:
+                        pass
+                
+                # PRIORIDAD 2: Buscar Windows Terminal en ubicaciones comunes
+                wt_executable = self._find_windows_terminal()
+                if wt_executable:
+                    try:
+                        # Intentar abrir Windows Terminal directamente
+                        if os.environ.get('WT_SESSION'):
+                            subprocess.run([
+                                wt_executable, 'new-tab', '--startingDirectory', str(project_path)
+                            ])
+                        else:
+                            subprocess.run([
+                                wt_executable, '-d', str(project_path)
+                            ])
+                        return True
+                    except Exception:
                         pass
                 
                 # Intentar PowerShell 7 con configuración limpia
@@ -1191,6 +1208,46 @@ $created_at = date('Y-m-d H:i:s');
         except Exception as e:
             self.menu.show_error(f"Error abriendo CMD: {e}")
             return False
+    
+    def _find_windows_terminal(self) -> Optional[str]:
+        """Busca Windows Terminal en ubicaciones comunes y retorna la ruta si lo encuentra."""
+        # Primero intentar el comando wt
+        if self._command_exists('wt'):
+            return 'wt'
+        
+        # Buscar ejecutable en ubicaciones comunes
+        wt_paths = [
+            # Microsoft Store - usuario actual
+            os.path.expandvars(r'%LOCALAPPDATA%\Microsoft\WindowsApps\wt.exe'),
+            # Microsoft Store - sistema (con wildcard)
+            r'C:\Program Files\WindowsApps\Microsoft.WindowsTerminal_*\wt.exe',
+            # Instalación manual
+            r'C:\Program Files\Windows Terminal\wt.exe',
+            r'C:\Program Files (x86)\Windows Terminal\wt.exe',
+            # Otras ubicaciones posibles
+            os.path.expandvars(r'%USERPROFILE%\AppData\Local\Microsoft\WindowsApps\Microsoft.WindowsTerminal_*\wt.exe'),
+            os.path.expandvars(r'%PROGRAMFILES%\WindowsApps\Microsoft.WindowsTerminal_*\wt.exe')
+        ]
+        
+        for wt_path in wt_paths:
+            try:
+                # Para rutas con wildcards, usar glob
+                if '*' in wt_path:
+                    import glob
+                    matching_paths = glob.glob(wt_path)
+                    if matching_paths:
+                        # Ordenar para obtener la versión más reciente
+                        matching_paths.sort(reverse=True)
+                        wt_path = matching_paths[0]
+                    else:
+                        continue
+                
+                if os.path.exists(wt_path):
+                    return wt_path
+            except Exception:
+                continue
+        
+        return None
 
 
 def main():
