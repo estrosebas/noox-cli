@@ -1042,12 +1042,19 @@ $created_at = date('Y-m-d H:i:s');
         """Abre terminal en el directorio del proyecto con manejo mejorado de errores."""
         try:
             if os.name == 'nt':
-                # Intentar Windows Terminal primero (más moderno y estable)
-                if os.environ.get('WT_SESSION') or self._command_exists('wt'):
+                # Intentar Windows Terminal primero - abrir en la app existente
+                if self._command_exists('wt'):
                     try:
-                        subprocess.Popen([
-                            'wt', '-d', str(project_path)
-                        ], creationflags=subprocess.CREATE_NEW_CONSOLE)
+                        # Si ya estamos en Windows Terminal, abrir nueva pestaña
+                        if os.environ.get('WT_SESSION'):
+                            subprocess.run([
+                                'wt', 'new-tab', '--startingDirectory', str(project_path)
+                            ])
+                        else:
+                            # Si no estamos en WT, abrir nueva ventana
+                            subprocess.run([
+                                'wt', '-d', str(project_path)
+                            ])
                         return True
                     except FileNotFoundError:
                         pass
@@ -1102,11 +1109,32 @@ $created_at = date('Y-m-d H:i:s');
         """Abre terminal sin cargar perfil para evitar conflictos."""
         try:
             if os.name == 'nt':
-                # Intentar PowerShell 7 sin perfil
+                # Intentar Windows Terminal con PowerShell sin perfil
+                if self._command_exists('wt'):
+                    try:
+                        if os.environ.get('WT_SESSION'):
+                            # Nueva pestaña en Windows Terminal existente
+                            subprocess.run([
+                                'wt', 'new-tab', '--startingDirectory', str(project_path),
+                                'pwsh', '-NoProfile', '-NoLogo', '-Command',
+                                f"Set-Location '{project_path}'; Write-Host 'Terminal limpio - Proyecto: {project_path.name}' -ForegroundColor Cyan"
+                            ])
+                        else:
+                            # Nueva ventana de Windows Terminal
+                            subprocess.run([
+                                'wt', '-d', str(project_path),
+                                'pwsh', '-NoProfile', '-NoLogo', '-Command',
+                                f"Set-Location '{project_path}'; Write-Host 'Terminal limpio - Proyecto: {project_path.name}' -ForegroundColor Cyan"
+                            ])
+                        return True
+                    except FileNotFoundError:
+                        pass
+                
+                # Fallback: PowerShell 7 sin perfil en ventana separada
                 try:
                     subprocess.Popen([
                         'pwsh', '-NoProfile', '-NoExit', '-NoLogo', '-Command', 
-                        f"Set-Location '{project_path}'; Write-Host 'Terminal limpio - Directorio: {project_path.name}' -ForegroundColor Cyan"
+                        f"Set-Location '{project_path}'; Write-Host 'Terminal limpio - Proyecto: {project_path.name}' -ForegroundColor Cyan"
                     ], creationflags=subprocess.CREATE_NEW_CONSOLE)
                     return True
                 except FileNotFoundError:
@@ -1132,6 +1160,26 @@ $created_at = date('Y-m-d H:i:s');
         """Abre CMD tradicional (más estable)."""
         try:
             if os.name == 'nt':
+                # Intentar Windows Terminal con CMD
+                if self._command_exists('wt'):
+                    try:
+                        if os.environ.get('WT_SESSION'):
+                            # Nueva pestaña CMD en Windows Terminal existente
+                            subprocess.run([
+                                'wt', 'new-tab', '--startingDirectory', str(project_path),
+                                'cmd', '/k', f'title Proyecto: {project_path.name} && echo Directorio: {project_path}'
+                            ])
+                        else:
+                            # Nueva ventana de Windows Terminal con CMD
+                            subprocess.run([
+                                'wt', '-d', str(project_path),
+                                'cmd', '/k', f'title Proyecto: {project_path.name} && echo Directorio: {project_path}'
+                            ])
+                        return True
+                    except FileNotFoundError:
+                        pass
+                
+                # Fallback: CMD en ventana separada
                 subprocess.Popen([
                     'cmd', '/k', 
                     f'cd /d "{project_path}" && title Proyecto: {project_path.name} && echo Directorio: {project_path}'

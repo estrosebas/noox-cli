@@ -120,15 +120,44 @@ class DesarrolloModule:
         """Abre VS Code en el directorio actual."""
         self.menu.clear_screen()
         
-        try:
-            if self._command_exists('code'):
-                subprocess.run(['code', '.'], check=True)
-                self.menu.show_success("✅ VS Code abierto correctamente")
-            else:
-                self.menu.show_error("❌ VS Code no está instalado o no está en PATH")
-                self.menu.show_info("💡 Instala VS Code desde: https://code.visualstudio.com")
-        except subprocess.CalledProcessError as e:
-            self.menu.show_error(f"Error abriendo VS Code: {e}")
+        if self._open_vscode_improved():
+            self.menu.show_success("✅ VS Code abierto correctamente")
+        else:
+            self.menu.show_error("❌ VS Code no está instalado o no se pudo abrir")
+            self.menu.show_info("💡 Instala VS Code desde: https://code.visualstudio.com/")
+    
+    def _open_vscode_improved(self) -> bool:
+        """Abre VS Code con mejor detección de rutas."""
+        # Lista de comandos a probar en orden de preferencia
+        vscode_commands = [
+            'code.cmd',  # Comando que funciona en tu sistema
+            'code',      # Comando directo
+            rf"C:\Users\{os.environ.get('USERNAME', '')}\AppData\Local\Programs\Microsoft VS Code\bin\code.cmd",
+            rf"C:\Users\{os.environ.get('USERNAME', '')}\AppData\Local\Programs\Microsoft VS Code\Code.exe",
+            r"C:\Program Files\Microsoft VS Code\bin\code.cmd",
+            r"C:\Program Files\Microsoft VS Code\Code.exe",
+            r"C:\Program Files (x86)\Microsoft VS Code\bin\code.cmd",
+            r"C:\Program Files (x86)\Microsoft VS Code\Code.exe"
+        ]
+        
+        for vscode_cmd in vscode_commands:
+            try:
+                # Si es solo 'code' o 'code.cmd', intentar como comando
+                if vscode_cmd in ['code', 'code.cmd']:
+                    subprocess.run([vscode_cmd, '.'], check=True, timeout=10)
+                    return True
+                
+                # Para rutas específicas, verificar que exista primero
+                if os.path.exists(vscode_cmd):
+                    subprocess.Popen([vscode_cmd, '.'])
+                    return True
+                    
+            except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+                continue
+            except Exception:
+                continue
+        
+        return False
     
     def _git_init(self):
         """Inicializa un repositorio Git."""
@@ -300,27 +329,199 @@ class DesarrolloModule:
             self.menu.show_info("\n🛑 Servidor detenido")
     
     def _open_powershell(self):
-        """Abre PowerShell en el directorio actual."""
+        """Abre PowerShell en el directorio actual con opciones mejoradas."""
         self.menu.clear_screen()
         
+        # Verificar si Windows Terminal está disponible
+        wt_available = self._command_exists('wt')
+        
+        # Ofrecer opciones de terminal
+        terminal_options = [
+            {'name': '🖥️ Terminal normal', 'value': 'normal'},
+            {'name': '🧹 Terminal limpio (sin perfil)', 'value': 'clean'},
+            {'name': '📦 CMD tradicional', 'value': 'cmd'}
+        ]
+        
+        # Agregar opción de Windows Terminal si no está disponible
+        if not wt_available:
+            terminal_options.append({
+                'name': '💡 Instalar Windows Terminal', 
+                'value': 'install_wt',
+                'description': 'Mejor experiencia con iconos y colores'
+            })
+        
+        terminal_choice = self.menu.show_menu(terminal_options, "🖥️ Tipo de terminal:")
+        
+        if not terminal_choice or terminal_choice == 'exit':
+            return
+        
         try:
-            if os.name == 'nt':  # Windows
-                subprocess.Popen([
-                    'powershell', '-NoExit', '-Command', 
-                    f"cd '{self.current_dir}'"
-                ])
-                self.menu.show_success("✅ PowerShell abierto en directorio actual")
-            else:  # Linux/macOS
-                # Abrir terminal nativo
-                if self._command_exists('gnome-terminal'):
-                    subprocess.Popen(['gnome-terminal', '--working-directory', str(self.current_dir)])
-                elif self._command_exists('xterm'):
-                    subprocess.Popen(['xterm'], cwd=str(self.current_dir))
+            if terminal_choice == 'install_wt':
+                self._install_windows_terminal()
+            elif terminal_choice == 'clean':
+                success = self._open_clean_terminal()
+            elif terminal_choice == 'cmd':
+                success = self._open_cmd_terminal()
+            else:
+                success = self._open_terminal()
+                
+            if terminal_choice != 'install_wt':
+                if success:
+                    self.menu.show_success("✅ Terminal abierto en directorio actual")
                 else:
-                    self.menu.show_warning("⚠️ No se pudo detectar un emulador de terminal")
-                    
+                    self.menu.show_error("❌ No se pudo abrir el terminal")
+                
         except Exception as e:
             self.menu.show_error(f"Error abriendo terminal: {e}")
+    
+    def _open_terminal(self) -> bool:
+        """Abre terminal normal en el directorio actual."""
+        try:
+            if os.name == 'nt':
+                # Intentar Windows Terminal primero - abrir en la app existente
+                if self._command_exists('wt'):
+                    try:
+                        # Si ya estamos en Windows Terminal, abrir nueva pestaña
+                        if os.environ.get('WT_SESSION'):
+                            subprocess.run([
+                                'wt', 'new-tab', '--startingDirectory', str(self.current_dir)
+                            ])
+                        else:
+                            # Si no estamos en WT, abrir nueva ventana
+                            subprocess.run([
+                                'wt', '-d', str(self.current_dir)
+                            ])
+                        return True
+                    except FileNotFoundError:
+                        pass
+                
+                # Intentar PowerShell 7 con configuración limpia
+                try:
+                    subprocess.Popen([
+                        'pwsh', '-NoExit', '-NoLogo', '-Command', 
+                        f"Set-Location '{self.current_dir}'"
+                    ], creationflags=subprocess.CREATE_NEW_CONSOLE)
+                    return True
+                except FileNotFoundError:
+                    pass
+                
+                # Fallback a PowerShell 5.1 con configuración limpia
+                try:
+                    subprocess.Popen([
+                        'powershell', '-NoExit', '-NoLogo', '-Command', 
+                        f"Set-Location '{self.current_dir}'"
+                    ], creationflags=subprocess.CREATE_NEW_CONSOLE)
+                    return True
+                except Exception:
+                    pass
+                
+                # Último recurso: CMD
+                try:
+                    subprocess.Popen([
+                        'cmd', '/k', f'cd /d "{self.current_dir}" && title Desarrollo: {self.current_dir.name}'
+                    ], creationflags=subprocess.CREATE_NEW_CONSOLE)
+                    return True
+                except Exception:
+                    pass
+                    
+            else:  # Linux/macOS
+                terminals = ['gnome-terminal', 'xterm', 'konsole']
+                for terminal in terminals:
+                    try:
+                        subprocess.Popen([terminal, '--working-directory', str(self.current_dir)])
+                        return True
+                    except FileNotFoundError:
+                        continue
+            
+            return False
+            
+        except Exception:
+            return False
+    
+    def _open_clean_terminal(self) -> bool:
+        """Abre terminal sin cargar perfil para evitar conflictos."""
+        try:
+            if os.name == 'nt':
+                # Intentar Windows Terminal con PowerShell sin perfil
+                if self._command_exists('wt'):
+                    try:
+                        if os.environ.get('WT_SESSION'):
+                            # Nueva pestaña en Windows Terminal existente
+                            subprocess.run([
+                                'wt', 'new-tab', '--startingDirectory', str(self.current_dir),
+                                'pwsh', '-NoProfile', '-NoLogo', '-Command',
+                                f"Set-Location '{self.current_dir}'; Write-Host 'Terminal limpio - Desarrollo: {self.current_dir.name}' -ForegroundColor Cyan"
+                            ])
+                        else:
+                            # Nueva ventana de Windows Terminal
+                            subprocess.run([
+                                'wt', '-d', str(self.current_dir),
+                                'pwsh', '-NoProfile', '-NoLogo', '-Command',
+                                f"Set-Location '{self.current_dir}'; Write-Host 'Terminal limpio - Desarrollo: {self.current_dir.name}' -ForegroundColor Cyan"
+                            ])
+                        return True
+                    except FileNotFoundError:
+                        pass
+                
+                # Fallback: PowerShell 7 sin perfil en ventana separada
+                try:
+                    subprocess.Popen([
+                        'pwsh', '-NoProfile', '-NoExit', '-NoLogo', '-Command', 
+                        f"Set-Location '{self.current_dir}'; Write-Host 'Terminal limpio - Desarrollo: {self.current_dir.name}' -ForegroundColor Cyan"
+                    ], creationflags=subprocess.CREATE_NEW_CONSOLE)
+                    return True
+                except FileNotFoundError:
+                    pass
+                
+                # Fallback a PowerShell 5.1 sin perfil
+                try:
+                    subprocess.Popen([
+                        'powershell', '-NoProfile', '-NoExit', '-NoLogo', '-Command', 
+                        f"Set-Location '{self.current_dir}'; Write-Host 'Terminal limpio - Desarrollo: {self.current_dir.name}' -ForegroundColor Cyan"
+                    ], creationflags=subprocess.CREATE_NEW_CONSOLE)
+                    return True
+                except Exception:
+                    return False
+            
+            return False
+            
+        except Exception:
+            return False
+    
+    def _open_cmd_terminal(self) -> bool:
+        """Abre CMD tradicional (más estable)."""
+        try:
+            if os.name == 'nt':
+                # Intentar Windows Terminal con CMD
+                if self._command_exists('wt'):
+                    try:
+                        if os.environ.get('WT_SESSION'):
+                            # Nueva pestaña CMD en Windows Terminal existente
+                            subprocess.run([
+                                'wt', 'new-tab', '--startingDirectory', str(self.current_dir),
+                                'cmd', '/k', f'title Desarrollo: {self.current_dir.name} && echo Directorio de desarrollo: {self.current_dir}'
+                            ])
+                        else:
+                            # Nueva ventana de Windows Terminal con CMD
+                            subprocess.run([
+                                'wt', '-d', str(self.current_dir),
+                                'cmd', '/k', f'title Desarrollo: {self.current_dir.name} && echo Directorio de desarrollo: {self.current_dir}'
+                            ])
+                        return True
+                    except FileNotFoundError:
+                        pass
+                
+                # Fallback: CMD en ventana separada
+                subprocess.Popen([
+                    'cmd', '/k', 
+                    f'cd /d "{self.current_dir}" && title Desarrollo: {self.current_dir.name} && echo Directorio de desarrollo: {self.current_dir}'
+                ], creationflags=subprocess.CREATE_NEW_CONSOLE)
+                return True
+            
+            return False
+            
+        except Exception:
+            return False
     
     def _git_status(self):
         """Muestra estado de Git y commits recientes."""
@@ -591,10 +792,120 @@ class DesarrolloModule:
         """Verifica si un comando existe en el sistema."""
         try:
             subprocess.run([command, '--version'], 
-                         capture_output=True, check=True)
+                         capture_output=True, check=True, timeout=5)
             return True
-        except (subprocess.CalledProcessError, FileNotFoundError):
+        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+            # Para VS Code, intentar variaciones del comando
+            if command == 'code':
+                try:
+                    subprocess.run(['code.cmd', '--version'], capture_output=True, check=True, timeout=5)
+                    return True
+                except:
+                    return self._check_vscode_installation()
+            elif command == 'wt':
+                # Para Windows Terminal, verificar de manera diferente
+                try:
+                    subprocess.run(['wt', '--help'], capture_output=True, check=True, timeout=5)
+                    return True
+                except:
+                    return False
             return False
+    
+    def _check_vscode_installation(self) -> bool:
+        """Verifica si VS Code está instalado en ubicaciones comunes."""
+        import os
+        
+        # Rutas comunes donde se instala VS Code
+        common_paths = [
+            rf"C:\Users\{os.environ.get('USERNAME', '')}\AppData\Local\Programs\Microsoft VS Code\bin\code.cmd",
+            rf"C:\Users\{os.environ.get('USERNAME', '')}\AppData\Local\Programs\Microsoft VS Code\Code.exe",
+            r"C:\Program Files\Microsoft VS Code\bin\code.cmd",
+            r"C:\Program Files\Microsoft VS Code\Code.exe",
+            r"C:\Program Files (x86)\Microsoft VS Code\bin\code.cmd",
+            r"C:\Program Files (x86)\Microsoft VS Code\Code.exe"
+        ]
+        
+        for path in common_paths:
+            try:
+                if os.path.exists(path):
+                    return True
+                subprocess.run([path, '--version'], capture_output=True, check=True, timeout=5)
+                return True
+            except:
+                continue
+        
+        return False
+    
+    def _install_windows_terminal(self):
+        """Ayuda al usuario a instalar Windows Terminal."""
+        self.menu.clear_screen()
+        
+        self.menu.show_info("💡 Windows Terminal - Mejor experiencia de terminal")
+        self.menu.console.print()
+        
+        # Mostrar beneficios
+        benefits_text = """🎨 Beneficios de Windows Terminal:
+• Pestañas múltiples en una sola ventana
+• Iconos y colores personalizables  
+• Mejor rendimiento y compatibilidad
+• Soporte completo para UTF-8
+• Temas y personalización avanzada"""
+        
+        benefits_panel = Panel(benefits_text, title="✨ ¿Por qué Windows Terminal?", border_style="cyan")
+        self.menu.console.print(benefits_panel)
+        self.menu.console.print()
+        
+        # Opciones de instalación
+        install_options = [
+            {'name': '🏪 Microsoft Store (recomendado)', 'value': 'store'},
+            {'name': '📦 winget (línea de comandos)', 'value': 'winget'},
+            {'name': '🌐 Descargar manualmente', 'value': 'manual'},
+            {'name': '❌ Cancelar', 'value': 'cancel'}
+        ]
+        
+        selection = self.menu.show_menu(install_options, "📥 ¿Cómo quieres instalar Windows Terminal?")
+        
+        if selection == 'store':
+            self.menu.show_info("🏪 Abriendo Microsoft Store...")
+            try:
+                subprocess.run(['start', 'ms-windows-store://pdp/?ProductId=9N0DX20HK701'], shell=True)
+                self.menu.show_success("✅ Microsoft Store abierto")
+                self.menu.show_info("💡 Busca 'Windows Terminal' e instálalo")
+            except Exception as e:
+                self.menu.show_error(f"Error abriendo Store: {e}")
+        
+        elif selection == 'winget':
+            if self._command_exists('winget'):
+                self.menu.show_info("📦 Instalando Windows Terminal con winget...")
+                try:
+                    result = subprocess.run(['winget', 'install', '--id=Microsoft.WindowsTerminal', '-e'], 
+                                          capture_output=True, text=True)
+                    if result.returncode == 0:
+                        self.menu.show_success("✅ Windows Terminal instalado correctamente")
+                        self.menu.show_info("🔄 Reinicia NooxCLI para usar Windows Terminal")
+                    else:
+                        self.menu.show_error("❌ Error instalando con winget")
+                        self.menu.show_info("💡 Prueba con Microsoft Store")
+                except Exception as e:
+                    self.menu.show_error(f"Error ejecutando winget: {e}")
+            else:
+                self.menu.show_error("❌ winget no está disponible")
+                self.menu.show_info("💡 Usa Microsoft Store en su lugar")
+        
+        elif selection == 'manual':
+            self.menu.show_info("🌐 Abriendo página de descarga...")
+            try:
+                webbrowser.open('https://github.com/microsoft/terminal/releases')
+                self.menu.show_success("✅ Página de descarga abierta")
+                self.menu.show_info("💡 Descarga la última versión (.msixbundle)")
+            except Exception as e:
+                self.menu.show_error(f"Error abriendo navegador: {e}")
+        
+        elif selection == 'cancel':
+            self.menu.show_info("ℹ️ Instalación cancelada")
+        
+        self.menu.console.print()
+        self.menu.show_info("💡 Después de instalar, reinicia NooxCLI para mejor experiencia")
 
 
 def main():
