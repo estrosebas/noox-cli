@@ -1,0 +1,3 @@
+"""
+Utilidades compartidas de NooxCLI.
+"""
