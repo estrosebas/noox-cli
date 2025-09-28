@@ -208,7 +208,23 @@ class ProyectosModule:
                     self.menu.show_info("💡 Instala VS Code desde: https://code.visualstudio.com/")
             
             elif selection == 'terminal':
-                if self._open_terminal(project_path):
+                # Ofrecer opciones de terminal
+                terminal_options = [
+                    {'name': '🖥️ Terminal normal', 'value': 'normal'},
+                    {'name': '🧹 Terminal limpio (sin perfil)', 'value': 'clean'},
+                    {'name': '📦 CMD tradicional', 'value': 'cmd'}
+                ]
+                
+                terminal_choice = self.menu.show_menu(terminal_options, "🖥️ Tipo de terminal:")
+                
+                if terminal_choice == 'clean':
+                    success = self._open_clean_terminal(project_path)
+                elif terminal_choice == 'cmd':
+                    success = self._open_cmd_terminal(project_path)
+                else:
+                    success = self._open_terminal(project_path)
+                
+                if success:
                     self.menu.show_success("✅ Terminal abierto")
                 else:
                     self.menu.show_error("❌ No se pudo abrir el terminal")
@@ -1026,37 +1042,46 @@ $created_at = date('Y-m-d H:i:s');
         """Abre terminal en el directorio del proyecto con manejo mejorado de errores."""
         try:
             if os.name == 'nt':
-                # Intentar Windows Terminal primero (más moderno)
-                if os.environ.get('WT_SESSION'):
+                # Intentar Windows Terminal primero (más moderno y estable)
+                if os.environ.get('WT_SESSION') or self._command_exists('wt'):
                     try:
                         subprocess.Popen([
                             'wt', '-d', str(project_path)
-                        ])
+                        ], creationflags=subprocess.CREATE_NEW_CONSOLE)
                         return True
                     except FileNotFoundError:
                         pass
                 
-                # Intentar PowerShell 7 primero (pwsh)
+                # Intentar PowerShell 7 con configuración limpia
                 try:
+                    # Usar una configuración más simple para evitar conflictos
                     subprocess.Popen([
-                        'pwsh', '-NoExit', '-Command', 
-                        f"Set-Location '{project_path}'; Write-Host 'Directorio: {project_path}' -ForegroundColor Green"
-                    ])
+                        'pwsh', '-NoExit', '-NoLogo', '-Command', 
+                        f"Set-Location '{project_path}'"
+                    ], creationflags=subprocess.CREATE_NEW_CONSOLE)
                     return True
                 except FileNotFoundError:
-                    # Fallback a PowerShell 5.1 si pwsh no está disponible
-                    try:
-                        subprocess.Popen([
-                            'powershell', '-NoExit', '-Command', 
-                            f"Set-Location '{project_path}'; Write-Host 'Directorio: {project_path}' -ForegroundColor Green"
-                        ])
-                        return True
-                    except Exception:
-                        # Último recurso: cmd
-                        subprocess.Popen([
-                            'cmd', '/k', f'cd /d "{project_path}"'
-                        ])
-                        return True
+                    pass
+                
+                # Fallback a PowerShell 5.1 con configuración limpia
+                try:
+                    subprocess.Popen([
+                        'powershell', '-NoExit', '-NoLogo', '-Command', 
+                        f"Set-Location '{project_path}'"
+                    ], creationflags=subprocess.CREATE_NEW_CONSOLE)
+                    return True
+                except Exception:
+                    pass
+                
+                # Último recurso: CMD (más estable para casos problemáticos)
+                try:
+                    subprocess.Popen([
+                        'cmd', '/k', f'cd /d "{project_path}" && title {project_path.name}'
+                    ], creationflags=subprocess.CREATE_NEW_CONSOLE)
+                    return True
+                except Exception:
+                    pass
+                    
             else:
                 # Linux/Mac
                 terminals = ['gnome-terminal', 'xterm', 'konsole']
@@ -1071,6 +1096,52 @@ $created_at = date('Y-m-d H:i:s');
             
         except Exception as e:
             self.menu.show_error(f"Error abriendo terminal: {e}")
+            return False
+    
+    def _open_clean_terminal(self, project_path: Path) -> bool:
+        """Abre terminal sin cargar perfil para evitar conflictos."""
+        try:
+            if os.name == 'nt':
+                # Intentar PowerShell 7 sin perfil
+                try:
+                    subprocess.Popen([
+                        'pwsh', '-NoProfile', '-NoExit', '-NoLogo', '-Command', 
+                        f"Set-Location '{project_path}'; Write-Host 'Terminal limpio - Directorio: {project_path.name}' -ForegroundColor Cyan"
+                    ], creationflags=subprocess.CREATE_NEW_CONSOLE)
+                    return True
+                except FileNotFoundError:
+                    pass
+                
+                # Fallback a PowerShell 5.1 sin perfil
+                try:
+                    subprocess.Popen([
+                        'powershell', '-NoProfile', '-NoExit', '-NoLogo', '-Command', 
+                        f"Set-Location '{project_path}'; Write-Host 'Terminal limpio - Directorio: {project_path.name}' -ForegroundColor Cyan"
+                    ], creationflags=subprocess.CREATE_NEW_CONSOLE)
+                    return True
+                except Exception:
+                    return False
+            
+            return False
+            
+        except Exception as e:
+            self.menu.show_error(f"Error abriendo terminal limpio: {e}")
+            return False
+    
+    def _open_cmd_terminal(self, project_path: Path) -> bool:
+        """Abre CMD tradicional (más estable)."""
+        try:
+            if os.name == 'nt':
+                subprocess.Popen([
+                    'cmd', '/k', 
+                    f'cd /d "{project_path}" && title Proyecto: {project_path.name} && echo Directorio: {project_path}'
+                ], creationflags=subprocess.CREATE_NEW_CONSOLE)
+                return True
+            
+            return False
+            
+        except Exception as e:
+            self.menu.show_error(f"Error abriendo CMD: {e}")
             return False
 
 
